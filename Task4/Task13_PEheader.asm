@@ -167,6 +167,22 @@ NumberOfRelocations db 9, "Number of Relocations: 0x", 0
 NumberOfLineNumbers db 9, "Number of Line Numbers: 0x", 0
 Characteristicss db 9, "Charactertistics: 0x", 0
 
+Partition db 9, "___________________________________", 0
+MajorVersion db 9, "MajorVersion: 0x", 0
+MinorVersion db 9, "MinorVersion: 0x", 0
+ExTbl db 9, "Export Table:", 0
+ImTbl db 9, "Import Table:", 0
+Base db 9, "Base: 0x", 0
+NumOfFunc db 9, "Number Of Functions: 0x", 0
+NumOfName db 9, "Number Of Names: 0x", 0
+AddOfFunc db 9, "Address Of Functions: 0x", 0
+AddOfName db 9, "Address Of Names: 0x", 0
+AddOfOrdi db 9, "Address Of Ordinals: 0x", 0
+
+Ori1Thunk db 9, "Original First Thunk: 0x", 0
+ForChain db 9, "Forwarder Chain: 0x", 0
+FirstThunk db 9, "First Thunk: 0x", 0
+
 newlinee db 0ah
 filename db 260 dup(0)		; 260 la kich thuoc toi da cua duong dan tep trong Windows
 ofn OPENFILENAME <>			; struct cau hinh, quan ly hop thoai chon tep.
@@ -189,8 +205,12 @@ HandleRead HANDLE 0
 HandleWrite HANDLE 0
 realout dd 0
 r1 db 8 dup(0)
-r2 db 8 dup(0)
+r2 db 16 dup(0)
 
+rvaExport dd 0
+sizeExport dd 0
+rvaImport dd 0
+sizeImport dd 0
 .data?
  sections db ?
 
@@ -267,74 +287,59 @@ pushad
 push ebp
 mov ebp, esp
 
-mov ebx, [ebp + 40]			; lay tham so truyen vao tu stack
+mov ebx, [ebp + 40]			; ebx = offset r1
 xor ecx, ecx
-movzx ecx, BYTE PTR [esi]
+movzx ecx, BYTE PTR [esi]	; ecx = sizee
 xor esi, esi
-add esi, 10h
-
-mov eax, 57h
+La:
+cmp esi, ecx
+jz Lae
+movzx eax, BYTE PTR[ebx + esi]
 push eax
-xor edi, edi
+inc esi
+jmp La
 
-L3:
-cmp edi, 2
-jz L4
-xor eax, eax
-push eax
-
-L4:
-xor edi, edi
-xor eax, eax
-cmp ecx, 0
-jz L2			; L2 neu eax = 0
-dec ecx
-mov al, BYTE PTR [ebx + ecx]
-cmp al, 0
-jnz	LOO			; [ebx + ecx] != 0
-push eax
-push eax
-jmp L4			; quay lai L4
-
-LOO:
+Lae:
+xor esi, esi
+Lb:
+mov edi, 10h
+cmp esi, ecx
+jz Lbe
+pop eax
 xor edx, edx
-idiv esi
-push edx
-inc edi
-cmp al, 0
-jz L3
-jmp LOO
+div edi			; edx:eax div 10h
+				; du = edx, thuong = eax
+mov edi, offset r2
+mov BYTE PTR [edi + esi*2], al
+mov BYTE PTR [edi + esi*2 +1], dl
+inc esi
+jmp Lb
+Lbe:
+inc esi
+mov edi, offset r2
+mov BYTE PTR [edi + esi*2], 10h
 
-L2:
-xor ebx, ebx
-xor edx, edx
-mov ebx, offset r2
-INN:
-pop ecx
-cmp cl, 57h
-jz OUTT
-mov BYTE PTR [ebx + edx], cl
-inc edx
-jmp INN
-
-OUTT:
+; Chuyen gia tri thanh ky tu
 xor ecx, ecx
-mov esi, offset Sizee
-movzx ecx, BYTE PTR [esi]
-add ecx, ecx
-mov BYTE PTR [esi], cl
-JUM:
-cmp ecx, 0
-jz EXITT
-dec ecx
-cmp BYTE PTR [ebx + ecx], 0ah
-jl Lu
-add BYTE PTR [ebx + ecx], 37h
-jmp JUM
-Lu:
-add BYTE PTR [ebx + ecx], 30h
-jmp JUM
-EXITT:
+mov edi, offset r2
+xor eax, eax
+Lc:
+mov al, BYTE PTR [edi + ecx]
+cmp al, 10h
+jz Lce
+cmp al, 0ah
+jl so
+; Chu
+add al, 37h
+jmp tralai
+so:
+add al, 30h
+tralai:
+mov BYTE PTR [edi + ecx], al
+inc ecx
+jmp Lc
+
+Lce:
 push offset r2
 call print
 
@@ -349,7 +354,9 @@ pushad
 push ebp
 mov ebp, esp
 mov ebx, [ebp + 40]
-invoke WriteConsole, HandleWrite, ebx, Sizee, ADDR realout, 0	; ebx = offset string duoc truyen len stack
+mov al, Sizee
+add al, Sizee
+invoke WriteConsole, HandleWrite, ebx, al, ADDR realout, 0	; ebx = offset string duoc truyen len stack
 invoke WriteConsole, HandleWrite, ADDR newlinee, 1, ADDR realout, 0	; xuong dong
 
 mov esp, ebp
@@ -357,6 +364,20 @@ pop ebp
 popad
 ret
 print endp
+
+print2 proc
+pushad
+push ebp
+mov ebp, esp
+mov ebx, [ebp + 40]
+invoke WriteConsole, HandleWrite, ebx, Sizee, ADDR realout, 0	; ebx = offset string duoc truyen len stack
+invoke WriteConsole, HandleWrite, ADDR newlinee, 1, ADDR realout, 0	; xuong dong
+
+mov esp, ebp
+pop ebp
+popad
+ret
+print2 endp
 
 printstr proc
 pushad
@@ -369,6 +390,33 @@ pop ebp
 popad
 ret
 printstr endp
+
+CalOffset proc base:DWORD,rva:DWORD
+	mov esi, base
+	mov eax, [esi+3Ch]; e_lfanew
+	add esi, eax
+	add esi, 4; signature
+	movzx ecx, word ptr [esi + 2] ; number of section
+	add esi, 20 ; file header
+	add esi, sizeof IMAGE_OPTIONAL_HEADER
+	mov edx, rva
+section_loop:
+	mov eax, [esi + 12]	; virtual address
+	mov ebx, [esi + 8]  ; size
+	add ebx, eax
+	cmp edx, eax
+	jb next_section
+	cmp edx, ebx
+	jae next_section
+	sub edx, eax		; rva - rvaSection
+	add edx, [esi + 20]; + PointerToRawData
+	ret
+next_section:
+	add esi, 40	; kich thuoc moi section
+	loop section_loop
+	mov edx, rva	; neu khong tim thay, tra ve rva
+	ret
+CalOffset endp
 
 main proc
 invoke GetStdHandle, STD_INPUT_HANDLE
@@ -929,6 +977,7 @@ call printstr
 add edi, 60h			; kich thuoc cua cac truong dung truoc data directory trong optional header
 	; Do khong co struct mau de bieu dien, ta truy cap truc tiep vao bo nho
 mov ecx, dword ptr [edi]
+mov rvaExport, ecx
 push 4
 call format
 
@@ -937,6 +986,7 @@ call strlen1
 push offset ExportTableSize
 call printstr
 mov ecx, dword ptr [edi + 4h]
+mov sizeExport, ecx
 push 4
 call format
 
@@ -945,6 +995,7 @@ call strlen1
 push offset ImportTableRVA
 call printstr
 mov ecx, dword ptr [edi + 8h]
+mov rvaImport, ecx
 push 4
 call format
 
@@ -953,6 +1004,7 @@ call strlen1
 push offset ImportTableSize
 call printstr
 mov ecx, dword ptr [edi + 0Ch]
+mov sizeImport, ecx
 push 4
 call format
 
@@ -1206,7 +1258,7 @@ mov ecx, edi
 mov ebx, offset Sizee
 mov byte ptr [ebx], 8
 push ecx
-call print
+call print2
 
 push offset VirtualSize
 call strlen1
@@ -1285,6 +1337,196 @@ dec al
 jmp restart
 
 success:
+push offset Partition
+call strlen1
+push offset Partition
+call printstr
+pushad
+invoke WriteConsole, HandleWrite, ADDR newlinee, 1, ADDR realout, 0	; xuong dong
+popad
+push offset ExTbl
+call strlen1
+push offset ExTbl
+call printstr
+pushad
+invoke WriteConsole, HandleWrite, ADDR newlinee, 1, ADDR realout, 0	; xuong dong
+popad
+; In ex/import Table
+cmp rvaExport, 0
+jz boquaEx
+mov eax, rvaExport
+push eax
+invoke CalOffset, filept, eax
+mov edi, filept		; lay pointer dau file
+add edi, edx		; lay duoc dia chi export table
+
+push offset Characteristicss
+call strlen1
+push offset Characteristicss
+call printstr
+mov ecx, dword ptr [edi]
+push 4
+call format
+
+push offset TimeDateStamp
+call strlen1
+push offset TimeDateStamp
+call printstr
+mov ecx, dword ptr [edi + 4]
+push 4
+call format
+
+push offset MajorVersion
+call strlen1
+push offset MajorVersion
+call printstr
+movzx ecx, word ptr [edi + 8]
+push 2
+call format
+
+push offset MinorVersion
+call strlen1
+push offset MinorVersion
+call printstr
+movzx ecx, word ptr [edi + 10]
+push 2
+call format
+
+push offset Namee
+call strlen1
+push offset Namee
+call printstr
+mov ecx, dword ptr [edi + 12]
+push 4
+call format
+
+push offset Base
+call strlen1
+push offset Base
+call printstr
+mov ecx, dword ptr [edi + 16]
+push 4
+call format
+
+push offset NumOfFunc
+call strlen1
+push offset NumOfFunc
+call printstr
+mov ecx, dword ptr [edi + 20]
+push 4
+call format
+
+push offset NumOfName
+call strlen1
+push offset NumOfName
+call printstr
+mov ecx, dword ptr [edi + 24]
+push 4
+call format
+
+push offset AddOfFunc
+call strlen1
+push offset AddOfFunc
+call printstr
+mov ecx, dword ptr [edi + 28]
+push 4
+call format
+
+push offset AddOfName
+call strlen1
+push offset AddOfName
+call printstr
+mov ecx, dword ptr [edi + 32]
+push 4
+call format
+
+push offset AddOfOrdi
+call strlen1
+push offset AddOfOrdi
+call printstr
+mov ecx, dword ptr [edi + 36]
+push 4
+call format
+
+boquaEx:
+push offset Partition
+call strlen1
+push offset Partition
+call printstr
+pushad
+invoke WriteConsole, HandleWrite, ADDR newlinee, 1, ADDR realout, 0	; xuong dong
+popad
+push offset ImTbl
+call strlen1
+push offset ImTbl
+call printstr
+pushad
+invoke WriteConsole, HandleWrite, ADDR newlinee, 1, ADDR realout, 0	; xuong dong
+popad
+cmp rvaImport, 0
+jz boquaIm
+
+mov eax, rvaImport
+push eax
+invoke CalOffset, filept, eax
+mov edi, filept		; lay pointer dau file
+add edi, edx		; lay duoc dia chi export table
+ImLoop:
+mov ecx, dword ptr [edi]
+cmp ecx, 0		; neu OFT = 00 thi struct nay rong
+jz boquaIm		; da duyet het struct import
+
+push offset Partition
+call strlen1
+push offset Partition
+call printstr
+invoke WriteConsole, HandleWrite, ADDR newlinee, 1, ADDR realout, 0	; xuong dong
+
+push offset Ori1Thunk
+call strlen1
+push offset Ori1Thunk
+call printstr
+mov ecx, dword ptr [edi]
+push 4
+call format
+
+push offset TimeDateStamp
+call strlen1
+push offset TimeDateStamp
+call printstr
+mov ecx, dword ptr [edi + 4]
+push 4
+call format
+
+push offset ForChain
+call strlen1
+push offset ForChain
+call printstr
+movzx ecx, word ptr [edi + 8]
+push 4
+call format
+
+push offset Namee
+call strlen1
+push offset Namee
+call printstr
+mov ecx, dword ptr [edi + 12]
+push 4
+call format
+
+push offset FirstThunk
+call strlen1
+push offset FirstThunk
+call printstr
+mov ecx, dword ptr [edi + 16]
+push 4
+call format
+
+add edi, 20
+jmp ImLoop
+
+boquaIm:
+
 jmp Exitt
 
 lack:
